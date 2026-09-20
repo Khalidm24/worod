@@ -1,0 +1,189 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A flower bouquet or luxury gift product available for purchase in Kenitra",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Product name in English or transliteration",
+          "maxLength": 100
+        },
+        "arabicName": {
+          "type": "string",
+          "description": "Product display name in Arabic",
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "description": "Full description of flower types and arrangement",
+          "maxLength": 1000
+        },
+        "price": {
+          "type": "number",
+          "description": "Price in Moroccan Dirhams (MAD)"
+        },
+        "originalPrice": {
+          "type": "number",
+          "description": "Original crossed-out price in MAD before discount"
+        },
+        "image": {
+          "type": "string",
+          "description": "High resolution image URL of the flower bouquet",
+          "maxLength": 1000
+        },
+        "category": {
+          "type": "string",
+          "description": "Product category code",
+          "maxLength": 50
+        },
+        "rating": {
+          "type": "number",
+          "description": "Customer average rating from 1.0 to 5.0"
+        },
+        "reviewCount": {
+          "type": "number",
+          "description": "Number of verified reviews"
+        },
+        "inStock": {
+          "type": "boolean",
+          "description": "Whether the flower bouquet is currently in stock"
+        },
+        "isBestSeller": {
+          "type": "boolean",
+          "description": "Flag for trending/bestseller badge"
+        },
+        "isNew": {
+          "type": "boolean",
+          "description": "Flag for new arrivals"
+        },
+        "colorTheme": {
+          "type": "string",
+          "description": "Primary color palette name",
+          "maxLength": 50
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of last modification"
+        }
+      },
+      "required": ["arabicName", "price", "image", "category"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer flower delivery order in Kenitra",
+      "type": "object",
+      "properties": {
+        "orderNumber": {
+          "type": "string",
+          "description": "Unique human-readable order code (e.g. BW-KN-123456)",
+          "maxLength": 30
+        },
+        "recipientName": {
+          "type": "string",
+          "description": "Recipient full name in Kenitra",
+          "maxLength": 100
+        },
+        "recipientPhone": {
+          "type": "string",
+          "description": "Moroccan phone number of recipient",
+          "maxLength": 30
+        },
+        "city": {
+          "type": "string",
+          "description": "Neighborhood in Kenitra",
+          "maxLength": 100
+        },
+        "district": {
+          "type": "string",
+          "description": "Detailed street or residence address",
+          "maxLength": 200
+        },
+        "deliveryDate": {
+          "type": "string",
+          "description": "Requested delivery date",
+          "maxLength": 100
+        },
+        "deliveryTime": {
+          "type": "string",
+          "description": "Requested delivery time slot",
+          "maxLength": 100
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method code (cod, card_cmi, bank_transfer, cashplus)",
+          "maxLength": 50
+        },
+        "cardMessage": {
+          "type": "string",
+          "description": "Custom gift card text",
+          "maxLength": 500
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Gift sender name",
+          "maxLength": 100
+        },
+        "total": {
+          "type": "number",
+          "description": "Total order amount in MAD"
+        },
+        "status": {
+          "type": "string",
+          "description": "Fulfillment status",
+          "maxLength": 30
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp of order creation"
+        }
+      },
+      "required": ["orderNumber", "recipientName", "recipientPhone", "city", "total", "status"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "General settings for Baqa & Ward store in Kenitra",
+      "type": "object",
+      "properties": {
+        "freeShippingThreshold": {
+          "type": "number",
+          "description": "Minimum cart amount for free delivery in MAD"
+        },
+        "whatsappNumber": {
+          "type": "string",
+          "description": "WhatsApp contact number (e.g. 212611938119)",
+          "maxLength": 30
+        },
+        "formattedPhone": {
+          "type": "string",
+          "description": "Display telephone number (0611938119)",
+          "maxLength": 30
+        },
+        "announcementText": {
+          "type": "string",
+          "description": "Top announcement marquee text",
+          "maxLength": 250
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp of last update"
+        }
+      }
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Catalog of flower bouquets and gifts editable by the store admin"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Delivery orders placed by customers and managed by the store admin"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "Store configuration and contact numbers"
+    }
+  }
+}

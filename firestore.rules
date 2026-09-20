@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Deny-All Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email == 'messkha31@gmail.com' &&
+        request.auth.token.email_verified == true;
+    }
+
+    // Connectivity verification document
+    match /test/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Products catalog
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(productId);
+    }
+
+    // Customer delivery orders
+    match /orders/{orderId} {
+      // Anyone can place an order during checkout
+      allow create: if isValidId(orderId) &&
+        request.resource.data.keys().hasAll(['orderNumber', 'recipientName', 'recipientPhone', 'city', 'total', 'status']) &&
+        request.resource.data.recipientName is string &&
+        request.resource.data.recipientName.size() <= 100 &&
+        request.resource.data.recipientPhone is string &&
+        request.resource.data.recipientPhone.size() <= 30 &&
+        request.resource.data.total is number &&
+        request.resource.data.total >= 0 &&
+        request.resource.data.status is string &&
+        request.resource.data.status.size() <= 30;
+
+      // Only store admin can list all customer orders, update delivery status, or manage orders
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Store settings & contact configs
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(settingId);
+    }
+  }
+}
+
