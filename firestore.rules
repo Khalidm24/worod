@@ -57,6 +57,18 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin() && isValidId(settingId);
     }
+
+    // Customers directory (synced with orders)
+    match /customers/{customerId} {
+      allow create: if isValidId(customerId);
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Google Sheets synchronization queue
+    match /sync_queue/{queueId} {
+      allow create: if isValidId(queueId);
+      allow read, update, delete: if isAdmin();
+    }
   }
 }
 

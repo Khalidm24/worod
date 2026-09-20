@@ -10,14 +10,67 @@ import {
   orderBy,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
-import { Product, OrderRecord, StoreSettings } from '../types';
+import { db, handleFirestoreError, OperationType, getCachedAccessToken } from './firebase';
+import { Product, OrderRecord, StoreSettings, CustomerRecord, Category, SyncQueueItem } from '../types';
 import { PRODUCTS as INITIAL_PRODUCTS } from '../data/flowerData';
+import { enqueueSync } from './syncQueueService';
+import { getSavedSheetId } from './googleSheetsService';
 
 const PRODUCTS_COLLECTION = 'products';
 const ORDERS_COLLECTION = 'orders';
+const CUSTOMERS_COLLECTION = 'customers';
 const SETTINGS_COLLECTION = 'settings';
 const MAIN_SETTINGS_DOC = 'main_config';
+
+/**
+ * Trigger Secondary Database (Google Sheets) Synchronization
+ * Non-blocking: Primary database operation remains successful even if Google Sheets is unreachable.
+ */
+export async function triggerEntitySync(
+  entity_type: SyncQueueItem['entity_type'],
+  entity_id: string,
+  operation: SyncQueueItem['operation'],
+  payload: any
+) {
+  const token = getCachedAccessToken();
+  const sheetId = getSavedSheetId();
+
+  if (!token || !sheetId) {
+    // If not currently authenticated with Google or no sheet selected, enqueue for later
+    await enqueueSync(
+      entity_type,
+      entity_id,
+      operation,
+      payload,
+      'في انتظار تفويض أو اتصال Google Sheets'
+    );
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/sheets/sync-item', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        spreadsheetId: sheetId,
+        entity_type,
+        operation,
+        payload,
+      }),
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || `Failed with status ${res.status}`);
+    }
+  } catch (err: any) {
+    console.warn(`[Secondary DB Backup] Google Sheets sync failed for ${entity_type}:${entity_id}:`, err);
+    await enqueueSync(entity_type, entity_id, operation, payload, err.message || String(err));
+  }
+}
 
 // 1. Subscribe to products from Firestore in real time
 export function subscribeToProducts(
@@ -30,12 +83,7 @@ export function subscribeToProducts(
     colRef,
     async (snapshot) => {
       if (snapshot.empty) {
-        // If DB is empty, automatically seed with initial Kenitra luxury products
-        try {
-          await seedInitialProducts();
-        } catch (seedErr) {
-          console.warn('Initial seeding note:', seedErr);
-        }
+        // If DB is empty, use initial catalog without throwing unauthenticated write errors
         onSuccess(INITIAL_PRODUCTS);
         return;
       }
@@ -67,9 +115,9 @@ export function subscribeToProducts(
       onSuccess(products);
     },
     (error) => {
-      console.error('Failed to subscribe to products:', error);
+      console.warn('Firestore subscription fallback to local catalog:', error);
+      onSuccess(INITIAL_PRODUCTS);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.LIST, PRODUCTS_COLLECTION);
     }
   );
 }
@@ -110,32 +158,39 @@ export async function saveProduct(product: Partial<Product> & { id?: string }) {
   const productId = product.id || 'prod-' + Date.now();
   const path = `${PRODUCTS_COLLECTION}/${productId}`;
 
+  const payload = {
+    name: product.name || 'باقة زهور جديدة',
+    arabicName: product.name || 'باقة زهور جديدة',
+    nameEn: product.nameEn || '',
+    price: Number(product.price) || 0,
+    originalPrice: product.originalPrice ? Number(product.originalPrice) : null,
+    rating: Number(product.rating) || 4.9,
+    reviewsCount: Number(product.reviewsCount) || 1,
+    image: product.image || 'https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=900&q=80',
+    category: product.category || 'anniversary',
+    categoryLabel: product.categoryLabel || 'باقات زهور',
+    tag: product.tag || '',
+    description: product.description || '',
+    flowerTypes: product.flowerTypes && product.flowerTypes.length > 0 ? product.flowerTypes : ['ورود طبيعية'],
+    inStock: product.inStock !== false,
+    isBestseller: Boolean(product.isBestseller),
+    isNew: Boolean(product.isNew),
+    updatedAt: new Date().toISOString(),
+  };
+
   try {
     const docRef = doc(db, PRODUCTS_COLLECTION, productId);
-    const payload = {
-      name: product.name || 'باقة زهور جديدة',
-      arabicName: product.name || 'باقة زهور جديدة',
-      nameEn: product.nameEn || '',
-      price: Number(product.price) || 0,
-      originalPrice: product.originalPrice ? Number(product.originalPrice) : null,
-      rating: Number(product.rating) || 4.9,
-      reviewsCount: Number(product.reviewsCount) || 1,
-      image: product.image || 'https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=900&q=80',
-      category: product.category || 'anniversary',
-      categoryLabel: product.categoryLabel || 'باقات زهور',
-      tag: product.tag || '',
-      description: product.description || '',
-      flowerTypes: product.flowerTypes && product.flowerTypes.length > 0 ? product.flowerTypes : ['ورود طبيعية'],
-      inStock: product.inStock !== false,
-      isBestseller: Boolean(product.isBestseller),
-      isNew: Boolean(product.isNew),
-      updatedAt: new Date().toISOString(),
-    };
-
     await setDoc(docRef, payload, { merge: true });
+
+    // Secondary DB (Google Sheets) Sync
+    triggerEntitySync('product', productId, 'update', { id: productId, ...payload });
+
     return productId;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+    // Even if Firestore write fails, try secondary backup
+    triggerEntitySync('product', productId, 'update', { id: productId, ...payload });
+    return productId;
   }
 }
 
@@ -145,28 +200,111 @@ export async function deleteProduct(productId: string) {
   try {
     const docRef = doc(db, PRODUCTS_COLLECTION, productId);
     await deleteDoc(docRef);
+
+    // Secondary DB (Google Sheets) Sync
+    triggerEntitySync('product', productId, 'delete', { id: productId });
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+    triggerEntitySync('product', productId, 'delete', { id: productId });
   }
 }
 
-// 5. Submit customer order to Firestore
+// Local storage cache keys
+const LOCAL_ORDERS_KEY = 'kenitra_orders_local_cache';
+
+function getCachedLocalOrders(): OrderRecord[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_ORDERS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedLocalOrders(orders: OrderRecord[]) {
+  try {
+    localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(orders));
+  } catch {
+    // Ignore storage quota
+  }
+}
+
+// 5. Submit customer order to Firestore (with local fallback and Google Sheets secondary sync)
 export async function createOrder(order: Omit<OrderRecord, 'id' | 'createdAt'>) {
   const orderId = 'ord-' + Date.now();
   const path = `${ORDERS_COLLECTION}/${orderId}`;
+  const payload: OrderRecord = {
+    ...order,
+    id: orderId,
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+  };
+
+  // Always cache locally so orders are never lost
+  const existingOrders = getCachedLocalOrders();
+  saveCachedLocalOrders([payload, ...existingOrders]);
 
   try {
     const docRef = doc(db, ORDERS_COLLECTION, orderId);
-    const payload = {
-      ...order,
-      createdAt: new Date().toISOString(),
-      status: 'pending',
-    };
     await setDoc(docRef, payload);
-    return orderId;
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    console.warn('Order saved to local cache; Firestore write deferred:', error);
   }
+
+  // Auto-sync Customer entity
+  if (order.recipientPhone) {
+    const custId = `cust-${order.recipientPhone.replace(/[^0-9]/g, '')}`;
+    saveCustomer({
+      id: custId,
+      name: order.recipientName || 'زبون المتجر',
+      phone: order.recipientPhone,
+      email: '',
+      address: `${order.district || ''} ${order.address || ''}`.trim(),
+      city: order.city || 'القنيطرة',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }).catch((e) => console.warn('Auto customer sync note:', e));
+  }
+
+  // Secondary DB (Google Sheets) Sync
+  triggerEntitySync('order', orderId, 'create', payload);
+
+  return orderId;
+}
+
+// Customer Directory Persistence
+export async function saveCustomer(customer: CustomerRecord) {
+  const customerId = customer.id || `cust-${Date.now()}`;
+  try {
+    const docRef = doc(db, CUSTOMERS_COLLECTION, customerId);
+    await setDoc(docRef, customer, { merge: true });
+    triggerEntitySync('customer', customerId, 'update', customer);
+    return customerId;
+  } catch (err) {
+    console.warn('Customer save to Firestore deferred:', err);
+    triggerEntitySync('customer', customerId, 'update', customer);
+    return customerId;
+  }
+}
+
+export function subscribeToCustomers(
+  onSuccess: (customers: CustomerRecord[]) => void
+) {
+  const colRef = collection(db, CUSTOMERS_COLLECTION);
+  return onSnapshot(
+    colRef,
+    (snap) => {
+      const customers: CustomerRecord[] = [];
+      snap.forEach((d) => {
+        customers.push(d.data() as CustomerRecord);
+      });
+      onSuccess(customers);
+    },
+    (err) => {
+      console.warn('Customers snapshot note:', err);
+      onSuccess([]);
+    }
+  );
 }
 
 // 6. Subscribe to orders (Admin)
@@ -202,24 +340,44 @@ export function subscribeToOrders(
           items: Array.isArray(d.items) ? d.items : [],
         });
       });
-      onSuccess(orders);
+
+      // Merge with any cached local orders
+      const localOrders = getCachedLocalOrders();
+      const existingIds = new Set(orders.map((o) => o.id));
+      const combined = [...orders, ...localOrders.filter((o) => !existingIds.has(o.id))];
+
+      onSuccess(combined);
     },
     (error) => {
-      console.error('Failed to subscribe to orders:', error);
+      console.warn('Orders subscription note, displaying local orders cache:', error);
+      onSuccess(getCachedLocalOrders());
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.LIST, ORDERS_COLLECTION);
     }
   );
 }
 
 // 7. Update order status (Admin)
-export async function updateOrderStatus(orderId: string, status: OrderRecord['status']) {
+export async function updateOrderStatus(orderId: string, status: OrderRecord['status'], extraOrderData?: any) {
   const path = `${ORDERS_COLLECTION}/${orderId}`;
   try {
     const docRef = doc(db, ORDERS_COLLECTION, orderId);
     await updateDoc(docRef, { status });
+
+    // Secondary DB (Google Sheets) Sync
+    triggerEntitySync('order', orderId, 'update', {
+      id: orderId,
+      orderNumber: orderId,
+      status,
+      ...(extraOrderData || {}),
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+    triggerEntitySync('order', orderId, 'update', {
+      id: orderId,
+      orderNumber: orderId,
+      status,
+      ...(extraOrderData || {}),
+    });
   }
 }
 

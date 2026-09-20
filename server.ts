@@ -4,6 +4,18 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import {
+  createSpreadsheet,
+  ensureSheets,
+  deleteProduct,
+  updateProduct,
+  appendOrder,
+  updateOrder,
+  updateCustomer,
+  updateCategory,
+  syncAllEntities,
+  testConnection,
+} from './src/lib/googleSheets';
 
 dotenv.config();
 
@@ -73,6 +85,154 @@ const FLORIST_SYSTEM_INSTRUCTION = `
 // API Health Check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Helper to extract Bearer token
+function getBearerToken(req: express.Request): string | null {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) return null;
+  return auth.slice(7).trim();
+}
+
+// ----------------------------------------------------
+// Google Sheets Secondary / Backup Database API Routes
+// ----------------------------------------------------
+
+// 1. Initialize or Ensure "Flower Store Database" with the 4 tabs & headers
+app.post('/api/sheets/init', async (req, res) => {
+  try {
+    const token = getBearerToken(req);
+    if (!token) {
+      res.status(401).json({ error: 'Missing or invalid Authorization Bearer token' });
+      return;
+    }
+
+    const { spreadsheetId, title } = req.body || {};
+    const effectiveId = spreadsheetId || process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+
+    if (effectiveId) {
+      const result = await ensureSheets(token, effectiveId);
+      res.json({
+        success: true,
+        spreadsheetId: effectiveId,
+        spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${effectiveId}/edit`,
+        title: title || 'Flower Store Database',
+        ...result,
+      });
+    } else {
+      const result = await createSpreadsheet(token, title || 'Flower Store Database');
+      res.json({
+        success: true,
+        ...result,
+      });
+    }
+  } catch (err: any) {
+    console.error('Error in /api/sheets/init:', err);
+    res.status(500).json({ error: err.message || 'Failed to initialize spreadsheet' });
+  }
+});
+
+// 2. Test connection to Google Sheet
+app.post('/api/sheets/test', async (req, res) => {
+  try {
+    const token = getBearerToken(req);
+    if (!token) {
+      res.status(401).json({ error: 'Missing or invalid Authorization Bearer token' });
+      return;
+    }
+
+    const { spreadsheetId } = req.body || {};
+    const effectiveId = spreadsheetId || process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+
+    if (!effectiveId) {
+      res.status(400).json({ error: 'Spreadsheet ID is required' });
+      return;
+    }
+
+    const result = await testConnection(token, effectiveId);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('Error in /api/sheets/test:', err);
+    res.status(500).json({ error: err.message || 'Failed to test connection' });
+  }
+});
+
+// 3. Sync a single entity operation (Create / Update / Delete)
+app.post('/api/sheets/sync-item', async (req, res) => {
+  try {
+    const token = getBearerToken(req);
+    if (!token) {
+      res.status(401).json({ error: 'Missing or invalid Authorization Bearer token' });
+      return;
+    }
+
+    const { spreadsheetId, entity_type, operation, payload } = req.body || {};
+    const effectiveId = spreadsheetId || process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+
+    if (!effectiveId) {
+      res.status(400).json({ error: 'Spreadsheet ID is required' });
+      return;
+    }
+
+    let opResult: any = null;
+
+    if (entity_type === 'product') {
+      if (operation === 'delete') {
+        opResult = await deleteProduct(token, effectiveId, payload?.id || payload);
+      } else {
+        opResult = await updateProduct(token, effectiveId, payload);
+      }
+    } else if (entity_type === 'order') {
+      if (operation === 'update') {
+        opResult = await updateOrder(token, effectiveId, payload);
+      } else {
+        opResult = await appendOrder(token, effectiveId, payload);
+      }
+    } else if (entity_type === 'customer') {
+      opResult = await updateCustomer(token, effectiveId, payload);
+    } else if (entity_type === 'category') {
+      opResult = await updateCategory(token, effectiveId, payload);
+    } else {
+      res.status(400).json({ error: `Unknown entity_type: ${entity_type}` });
+      return;
+    }
+
+    res.json({ success: true, entity_type, operation, opResult });
+  } catch (err: any) {
+    console.error('Error in /api/sheets/sync-item:', err);
+    res.status(500).json({ error: err.message || 'Failed to sync item to Google Sheets' });
+  }
+});
+
+// 4. Batch sync all entities (Products, Orders, Customers, Categories)
+app.post('/api/sheets/sync', async (req, res) => {
+  try {
+    const token = getBearerToken(req);
+    if (!token) {
+      res.status(401).json({ error: 'Missing or invalid Authorization Bearer token' });
+      return;
+    }
+
+    const { spreadsheetId, products, orders, customers, categories } = req.body || {};
+    const effectiveId = spreadsheetId || process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
+
+    if (!effectiveId) {
+      res.status(400).json({ error: 'Spreadsheet ID is required' });
+      return;
+    }
+
+    const result = await syncAllEntities(token, effectiveId, {
+      products,
+      orders,
+      customers,
+      categories,
+    });
+
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('Error in /api/sheets/sync:', err);
+    res.status(500).json({ error: err.message || 'Failed to sync entities to Google Sheets' });
+  }
 });
 
 // Multi-turn Chat Route with Gemini

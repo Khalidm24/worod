@@ -83,3 +83,40 @@ export interface StoreSettings {
   announcementText: string;
   updatedAt?: string;
 }
+
+export interface CustomerRecord {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  address: string;
+  city: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SyncQueueItem {
+  id: string;
+  entity_type: 'product' | 'order' | 'customer' | 'category';
+  entity_id: string;
+  operation: 'create' | 'update' | 'delete';
+  payload: any;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  attempts: number;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoogleSheetsSyncStats {
+  connected: boolean;
+  spreadsheetId: string | null;
+  spreadsheetTitle: string;
+  lastSyncTime: string | null;
+  pendingCount: number;
+  failedCount: number;
+  productsCount: number;
+  ordersCount: number;
+  customersCount: number;
+  categoriesCount: number;
+}

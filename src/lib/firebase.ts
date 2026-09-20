@@ -4,9 +4,24 @@ import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
+export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+// Google Workspace Google Sheets & Drive Scopes
+googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
+googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+
+// In-memory token cache (Workspace requirement: do not persist to localStorage)
+let cachedAccessToken: string | null = null;
+let isSigningIn = false;
+
+export function getCachedAccessToken(): string | null {
+  return cachedAccessToken;
+}
+
+export function setCachedAccessToken(token: string | null) {
+  cachedAccessToken = token;
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -69,19 +84,27 @@ export async function testConnection() {
 
 export const ADMIN_EMAIL = 'messkha31@gmail.com';
 
-export async function loginWithGoogle() {
+export async function loginWithGoogle(): Promise<{ user: any; accessToken: string | null }> {
   try {
+    isSigningIn = true;
     const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      cachedAccessToken = credential.accessToken;
+    }
+    return { user: result.user, accessToken: cachedAccessToken };
   } catch (error) {
     console.error('Google Sign-In failed:', error);
     throw error;
+  } finally {
+    isSigningIn = false;
   }
 }
 
 export async function logoutUser() {
   try {
     await signOut(auth);
+    cachedAccessToken = null;
   } catch (error) {
     console.error('Sign-out failed:', error);
     throw error;

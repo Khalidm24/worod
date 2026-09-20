@@ -22,6 +22,8 @@ import {
   Truck,
   Eye,
   RefreshCw,
+  FileSpreadsheet,
+  Database,
 } from 'lucide-react';
 import { Product, OrderRecord, StoreSettings } from '../types';
 import {
@@ -35,12 +37,16 @@ import {
 } from '../lib/productService';
 import { useAuth } from '../lib/AuthContext';
 import { ADMIN_EMAIL } from '../lib/firebase';
+import { OrdersDatabaseTable } from './OrdersDatabaseTable';
+import { getSavedSheetId, getSpreadsheetUrl, subscribeToCloudSheetConfig } from '../lib/googleSheetsService';
+import { GoogleSheetsSyncDashboard } from './GoogleSheetsSyncDashboard';
 
 interface AdminDashboardModalProps {
   isOpen: boolean;
   onClose: () => void;
   products: Product[];
   onProductUpdated?: () => void;
+  initialTab?: 'products' | 'orders' | 'sheets-sync' | 'settings';
 }
 
 // Curated high quality flower photos for 1-click photo replacement
@@ -59,10 +65,11 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   isOpen,
   onClose,
   products,
+  initialTab = 'products',
 }) => {
   const { currentUser, isAdmin, signInWithGoogle, signOut, loading: authLoading } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'sheets-sync' | 'settings'>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -73,6 +80,12 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
 
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
+
   // Store Settings state
   const [settings, setSettings] = useState<StoreSettings>({
     freeShippingThreshold: 250,
@@ -80,6 +93,16 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     formattedPhone: '06 11 93 81 19',
     announcementText: '🌸 توصيل فوري لجميع أحياء القنيطرة والمهدية ونواحيها في أقل من ساعتين!',
   });
+
+  // Google Sheets state
+  const [spreadsheetId, setSpreadsheetId] = useState<string | null>(getSavedSheetId());
+
+  useEffect(() => {
+    const unsub = subscribeToCloudSheetConfig((info) => {
+      if (info?.id) setSpreadsheetId(info.id);
+    });
+    return () => unsub();
+  }, []);
 
   // Subscribe to store settings
   useEffect(() => {
@@ -227,6 +250,19 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {spreadsheetId && (
+              <a
+                href={getSpreadsheetUrl(spreadsheetId)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden sm:flex items-center gap-1.5 bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl border border-emerald-600/60 shadow-sm transition-all active:scale-95"
+                title="فتح جدول الطلبات مباشرة في Google Sheets"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
+                <span>فتح في Google Sheets ↗</span>
+              </a>
+            )}
+
             <button
               onClick={onClose}
               className="p-2 text-stone-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors"
@@ -312,8 +348,20 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                 : 'border-transparent text-stone-500 hover:text-stone-800'
             }`}
           >
-            <ShoppingBag className="w-4 h-4" />
-            <span>طلبات التوصيل بالقنيطرة {orders.length > 0 && `(${orders.length})`}</span>
+            <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+            <span>قاعدة بيانات الطلبات (Google Sheets) {orders.length > 0 && `(${orders.length})`}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('sheets-sync')}
+            className={`py-3 px-4 text-xs sm:text-sm font-bold border-b-2 flex items-center gap-2 transition-all ${
+              activeTab === 'sheets-sync'
+                ? 'border-emerald-800 text-emerald-900 bg-emerald-50/50'
+                : 'border-transparent text-stone-500 hover:text-stone-800'
+            }`}
+          >
+            <Database className="w-4 h-4 text-emerald-700" />
+            <span>مزامنة Google Sheets (Backup DB)</span>
           </button>
 
           <button
@@ -662,120 +710,23 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: ORDERS MANAGEMENT */}
+          {/* TAB 2: ORDERS MANAGEMENT & GOOGLE SHEETS DATABASE TABLE */}
           {activeTab === 'orders' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-stone-800">
-                  طلبات الزبناء بمدينة القنيطرة ({orders.length})
-                </h3>
-                <span className="text-xs text-stone-500">
-                  محدثة مباشرة من Firestore
-                </span>
-              </div>
-
-              {ordersLoading ? (
-                <div className="text-center py-12 text-stone-400 text-sm">
-                  جاري تحميل الطلبات...
-                </div>
-              ) : orders.length === 0 ? (
-                <div className="text-center py-12 bg-white rounded-2xl border border-stone-200 p-8 space-y-2">
-                  <ShoppingBag className="w-10 h-10 text-stone-300 mx-auto" />
-                  <p className="text-sm font-bold text-stone-700">لا توجد طلبات مسجلة بعد</p>
-                  <p className="text-xs text-stone-400">أي طلب يتم إنهاؤه في المتجر سيظهر هنا فوراً مع تفاصيل العنوان بالقنيطرة ورقم الهاتف.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {orders.map((ord) => (
-                    <div
-                      key={ord.id}
-                      className="bg-white rounded-2xl border border-stone-200 p-4 shadow-sm hover:border-emerald-200 transition-all text-xs sm:text-sm space-y-3"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-extrabold text-emerald-950 font-sans">
-                            {ord.orderNumber}
-                          </span>
-                          <span className="text-stone-400">•</span>
-                          <span className="font-bold text-stone-800">{ord.recipientName}</span>
-                          <span className="text-stone-400">•</span>
-                          <span className="text-stone-500 font-medium">{ord.city}</span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-stone-500 text-xs">الحالة:</span>
-                          <select
-                            value={ord.status}
-                            onChange={(e) => updateOrderStatus(ord.id, e.target.value as any)}
-                            className={`text-xs font-bold rounded-lg px-2.5 py-1 border focus:outline-none ${
-                              ord.status === 'delivered'
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                : ord.status === 'out_for_delivery'
-                                ? 'bg-blue-50 text-blue-800 border-blue-300'
-                                : ord.status === 'processing'
-                                ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                : 'bg-stone-100 text-stone-800 border-stone-300'
-                            }`}
-                          >
-                            <option value="pending">قيد المراجعة</option>
-                            <option value="processing">جاري التنسيق والتجهيز</option>
-                            <option value="out_for_delivery">جاري التوصيل بالقنيطرة</option>
-                            <option value="delivered">تم التسليم بنجاح ✓</option>
-                            <option value="cancelled">ملغي</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-stone-600">
-                        <div>
-                          <span className="text-stone-400 block text-[11px]">الهاتف والتواصل:</span>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="font-bold text-stone-900 dir-ltr">{ord.recipientPhone}</span>
-                            <a
-                              href={`https://wa.me/${ord.recipientPhone.replace(/[^0-9]/g, '')}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-emerald-600 hover:text-emerald-700"
-                              title="واتساب مباشر"
-                            >
-                              <MessageCircle className="w-3.5 h-3.5 fill-current" />
-                            </a>
-                            <a
-                              href={`tel:${ord.recipientPhone}`}
-                              className="text-stone-500 hover:text-stone-800"
-                              title="اتصال هاتفي"
-                            >
-                              <Phone className="w-3.5 h-3.5" />
-                            </a>
-                          </div>
-                        </div>
-
-                        <div>
-                          <span className="text-stone-400 block text-[11px]">العنوان بالقنيطرة:</span>
-                          <span className="font-medium text-stone-800">{ord.district || ord.city}</span>
-                        </div>
-
-                        <div>
-                          <span className="text-stone-400 block text-[11px]">المبلغ وطريقة الدفع:</span>
-                          <span className="font-extrabold text-emerald-900 font-cairo">
-                            {ord.total} درهم
-                          </span>
-                          <span className="text-stone-400 text-[11px] mr-1">({ord.paymentMethod})</span>
-                        </div>
-                      </div>
-
-                      {ord.cardMessage && (
-                        <div className="bg-rose-50/60 rounded-xl p-2.5 border border-rose-100 text-xs text-rose-900">
-                          <span className="font-bold">رسالة الإهداء: </span>
-                          <span>"{ord.cardMessage}"</span>
-                          {ord.senderName && <span className="font-semibold mr-1"> — من: {ord.senderName}</span>}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <OrdersDatabaseTable
+              orders={orders}
+              loading={ordersLoading}
+              onRefreshOrders={() => {
+                setOrdersLoading(true);
+                const unsub = subscribeToOrders(
+                  (loadedOrders) => {
+                    setOrders(loadedOrders);
+                    setOrdersLoading(false);
+                  },
+                  () => setOrdersLoading(false)
+                );
+                return () => unsub();
+              }}
+            />
           )}
 
           {/* TAB 3: STORE SETTINGS */}
@@ -846,6 +797,14 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                 </div>
               </form>
             </div>
+          )}
+
+          {/* TAB 4: GOOGLE SHEETS SECONDARY / BACKUP DATABASE SYNC */}
+          {activeTab === 'sheets-sync' && (
+            <GoogleSheetsSyncDashboard
+              products={products}
+              orders={orders}
+            />
           )}
         </div>
       </div>

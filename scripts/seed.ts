@@ -4,10 +4,10 @@ import firebaseConfig from '../firebase-applet-config.json';
 import { PRODUCTS } from '../src/data/flowerData';
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
 
 async function runSeed() {
-  console.log('Seeding products to Firestore database:', firebaseConfig.firestoreDatabaseId);
+  console.log('Seeding products to Firestore database:', (firebaseConfig as any).firestoreDatabaseId);
 
   for (const prod of PRODUCTS) {
     const docRef = doc(db, 'products', prod.id);

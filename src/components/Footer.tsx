@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { Sparkles, Phone, Mail, MapPin, Send, Check, Clock, MessageCircle } from 'lucide-react';
+import { Sparkles, Phone, Mail, MapPin, Send, Check, Clock, MessageCircle, FileSpreadsheet } from 'lucide-react';
 
-export const Footer: React.FC = () => {
+interface FooterProps {
+  onOpenOrdersDatabase?: () => void;
+}
+
+export const Footer: React.FC<FooterProps> = ({ onOpenOrdersDatabase }) => {
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
 
@@ -146,6 +150,17 @@ export const Footer: React.FC = () => {
               <li>
                 <a href="#testimonials" className="hover:text-rose-300 transition-colors">تقييمات وآراء العملاء</a>
               </li>
+              {onOpenOrdersDatabase && (
+                <li className="pt-1">
+                  <button
+                    onClick={onOpenOrdersDatabase}
+                    className="text-emerald-400 hover:text-emerald-300 font-bold transition-colors flex items-center gap-1.5"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>جدول الطلبيات (Google Sheets)</span>
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -197,9 +212,21 @@ export const Footer: React.FC = () => {
 
         {/* Bottom Bar & Payment Brands */}
         <div className="pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-stone-500">
-          <p>
-            © {new Date().getFullYear()} باقة وورد - القنيطرة (Baqa & Ward Kénitra). جميع الحقوق محفوظة
-          </p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <p>
+              © {new Date().getFullYear()} باقة وورد - القنيطرة (Baqa & Ward Kénitra). جميع الحقوق محفوظة
+            </p>
+            {onOpenOrdersDatabase && (
+              <button
+                onClick={onOpenOrdersDatabase}
+                className="text-stone-400 hover:text-emerald-400 text-[11px] flex items-center gap-1 transition-colors px-2 py-0.5 rounded-md hover:bg-stone-900 border border-transparent hover:border-stone-800"
+                title="جدول الطلبات وقاعدة بيانات Google Sheets للمسؤول"
+              >
+                <FileSpreadsheet className="w-3 h-3 text-emerald-500" />
+                <span>قاعدة بيانات الطلبيات</span>
+              </button>
+            )}
+          </div>
 
           {/* Payment Badges */}
           <div className="flex items-center gap-2 flex-wrap justify-center">

@@ -28,13 +28,24 @@ export default function App() {
   // Products from Firestore (with initial fallback)
   const [products, setProducts] = useState<Product[]>(PRODUCTS);
   const [isAdminDashboardOpen, setIsAdminDashboardOpen] = useState(false);
+  const [adminInitialTab, setAdminInitialTab] = useState<'products' | 'orders' | 'settings'>('products');
 
   // Subscribe to real-time products in Firestore
   useEffect(() => {
-    // If URL contains ?admin=true or #admin, allow opening dashboard modal
+    // If URL contains ?orders=true, ?tab=orders, #orders, ?admin=true, or #admin, allow opening dashboard modal
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
-      if (searchParams.get('admin') === 'true' || window.location.hash === '#admin') {
+      const isOrdersRequested =
+        searchParams.get('orders') === 'true' ||
+        searchParams.get('tab') === 'orders' ||
+        searchParams.get('admin') === 'orders' ||
+        window.location.hash === '#orders';
+
+      if (isOrdersRequested) {
+        setAdminInitialTab('orders');
+        setIsAdminDashboardOpen(true);
+      } else if (searchParams.get('admin') === 'true' || window.location.hash === '#admin') {
+        setAdminInitialTab('products');
         setIsAdminDashboardOpen(true);
       }
     }
@@ -235,7 +246,12 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <Footer />
+      <Footer
+        onOpenOrdersDatabase={() => {
+          setAdminInitialTab('orders');
+          setIsAdminDashboardOpen(true);
+        }}
+      />
 
       {/* Quick View Product Modal */}
       <QuickViewModal
@@ -270,11 +286,12 @@ export default function App() {
         }}
       />
 
-      {/* Admin Dashboard Modal */}
+      {/* Admin Dashboard Modal with Orders Database & Google Sheets */}
       <AdminDashboardModal
         isOpen={isAdminDashboardOpen}
         onClose={() => setIsAdminDashboardOpen(false)}
         products={products}
+        initialTab={adminInitialTab}
       />
 
       {/* Floating WhatsApp Quick Contact Button (Bottom Left) */}

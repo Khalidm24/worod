@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { CartItem, OrderDetails } from '../types';
 import { X, CheckCircle, CreditCard, ShieldCheck, MapPin, Calendar, Clock, User, Phone, Sparkles } from 'lucide-react';
 import { createOrder } from '../lib/productService';
+import { getSavedSheetId, appendOrderToSheet } from '../lib/googleSheetsService';
+import { getCachedAccessToken } from '../lib/firebase';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -50,20 +52,35 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     const generatedOrderNo = 'BW-KN-' + Math.floor(100000 + Math.random() * 900000);
 
+    const newOrderPayload = {
+      ...formData,
+      orderNumber: generatedOrderNo,
+      total: Math.round(total),
+      status: 'pending' as const,
+      items: items.map((i) => ({
+        productId: i.product.id,
+        productName: i.product.name,
+        productImage: i.product.image,
+        price: i.product.price,
+        quantity: i.quantity,
+      })),
+    };
+
     try {
-      await createOrder({
-        ...formData,
-        orderNumber: generatedOrderNo,
-        total: Math.round(total),
-        status: 'pending',
-        items: items.map((i) => ({
-          productId: i.product.id,
-          productName: i.product.name,
-          productImage: i.product.image,
-          price: i.product.price,
-          quantity: i.quantity,
-        })),
-      });
+      await createOrder(newOrderPayload);
+
+      // Auto-append to Google Sheets if connected and token available
+      const savedSheetId = getSavedSheetId();
+      const cachedToken = getCachedAccessToken();
+      if (savedSheetId && cachedToken) {
+        appendOrderToSheet(cachedToken, savedSheetId, {
+          ...newOrderPayload,
+          id: generatedOrderNo,
+          createdAt: new Date().toISOString(),
+        }).catch((err) => {
+          console.warn('Google Sheets auto-append notice:', err);
+        });
+      }
     } catch (err) {
       console.warn('Order saved locally or offline:', err);
     }
